@@ -1,0 +1,6 @@
+{
+  "name": "OptiMark OMR Studio & Google Sheets Grader",
+  "description": "50-MCQ OMR Sheet Generator, Pre-Configured Answer Key Manager, High-Precision Mobile OMR Scanner, and Direct Google Sheets Result Sync.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
