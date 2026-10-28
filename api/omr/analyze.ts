@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 const BENGALI_TO_ENGLISH_MAP: Record<string, string> = {
   '০': '0',
@@ -35,7 +35,6 @@ export default async function handler(req: any, res: any) {
     const {
       imageBase64,
       idCropBase64,
-      mcqCropBase64,
       mimeType = 'image/jpeg',
       totalQuestions = 50,
     } = req.body || {};
@@ -47,9 +46,6 @@ export default async function handler(req: any, res: any) {
     const cleanBase64 = String(imageBase64).replace(/^data:image\/\w+;base64,/, '');
     const cleanIdCrop = idCropBase64
       ? String(idCropBase64).replace(/^data:image\/\w+;base64,/, '')
-      : '';
-    const cleanMcqCrop = mcqCropBase64
-      ? String(mcqCropBase64).replace(/^data:image\/\w+;base64,/, '')
       : '';
 
     const ai = new GoogleGenAI({
@@ -67,28 +63,35 @@ export default async function handler(req: any, res: any) {
     const col1End = base + (rem >= 1 ? 1 : 0);
     const col2End = col1End + base + (rem >= 2 ? 1 : 0);
 
-    const prompt = `You are an ultra-accurate Optical Mark Recognition (OMR) grader for the "বাংলা বিদ্যাপীঠ" A4 Answer Sheet.
-We have provided high-contrast images of the sheet:
-- Image 1: Full OMR Answer Sheet.
-${cleanIdCrop ? '- Image 2: High-resolution close-up of the top Candidate Details, 6-Digit Roll/ID Grid ("রোল / আইডি নম্বর · 6-Digit ID"), and Set Code ("সেট কোড").' : ''}
-${cleanMcqCrop ? `- Image 3: High-resolution close-up of the 3-Column MCQ Bubble Grid (Column 1: Q1–${col1End}, Column 2: Q${col1End + 1}–${col2End}, Column 3: Q${col2End + 1}–${total}).` : ''}
+    const prompt = `You are a precision Optical Mark Recognition (OMR) reader for the "বাংলা বিদ্যাপীঠ" A4 Answer Sheet.
+${
+  cleanIdCrop
+    ? 'Image 1 is the full OMR sheet. Image 2 is a zoomed close-up of the top Candidate Details, 6-Digit Roll/ID Grid ("রোল / আইডি নম্বর · 6-Digit ID"), and Set Code ("সেট কোড").'
+    : 'Analyze the provided OMR Answer Sheet image.'
+}
 
-STEP 1 — COLUMN-BY-COLUMN 6-DIGIT ID EXTRACTION ("রোল / আইডি নম্বর"):
-- Look carefully at the middle top section ("রোল / আইডি নম্বর · 6-Digit ID").
-- There are 6 vertical columns from left to right (Column 1 to Column 6).
-- Each column has a rectangular box at the top and 10 vertical circles below it labeled 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 from top to bottom (with row guide numbers 0–9 on both the left and right edges).
-- For EACH of the 6 columns (colIndex 1 to 6), read "writtenBoxDigit", "darkenedBubbleDigit", and "finalDigit".
-- Concatenate all 6 "finalDigit" values in order (Column 1 to Column 6) to form "roll" (e.g., "240105").
+1. EXTRACT 6-DIGIT ROLL / ID ("রোল / আইডি নম্বর"):
+   - Located in the top middle box ("রোল / আইডি নম্বর · 6-Digit ID").
+   - Has 6 vertical columns from left to right (Column 1 to Column 6).
+   - Each column has a top box (where a digit 0–9 or বাংলা ০–৯ may be written) and 10 circles below it (0 to 9 from top to bottom, with row numbers 0–9 on both left and right sides).
+   - For each of the 6 columns from left to right, read the digit (either written in the top box or darkened in the 0–9 circle column).
+   - Return "idDigits" as an array of 6 strings (e.g. ["2","4","0","1","0","5"]) and "roll" as the 6-digit string (e.g. "240105").
 
-STEP 2 — SET CODE & CANDIDATE INFO:
-- "setCode": Read from the right box ("সেট কোড"): "A", "B", "C", or "D".
-- "studentName", "className", "schoolName": Read from the left box if visible.
+2. EXTRACT SET CODE & STUDENT INFO:
+   - "setCode": "A", "B", "C", or "D" from the top right box ("সেট কোড").
+   - "studentName": Name next to "নাম:" (or "").
+   - "className": Class next to "শ্রেণি:" (or "").
+   - "schoolName": School next to "স্কুল:" (or "").
 
-STEP 3 — ROW-BY-ROW ${total} MCQ BUBBLE EXTRACTION:
-- Left Column: Questions 1 to ${col1End}
-- Middle Column: Questions ${col1End + 1} to ${col2End}
-- Right Column: Questions ${col2End + 1} to ${total}
-- For EVERY question from 1 to ${total}, return "A", "B", "C", "D", "" (if empty), or "MULTIPLE".`;
+3. EXTRACT DARKENED MCQ BUBBLES (Questions 1 to ${total}):
+   - The MCQ grid has 3 columns:
+     * Column 1: Questions 1 to ${col1End}
+     * Column 2: Questions ${col1End + 1} to ${col2End}
+     * Column 3: Questions ${col2End + 1} to ${total}
+   - Each question has 4 circles: A, B, C, D.
+   - Return in "answeredQuestions" ONLY the questions where at least one circle (A, B, C, or D) is visibly darkened/filled in!
+   - Do NOT include unbubbled/blank questions in "answeredQuestions".
+   - If a question has 1 darkened circle, set "selected" to "A", "B", "C", or "D". If 2+ circles are darkened in the same row, set "selected" to "MULTIPLE".`;
 
     const parts: any[] = [
       {
@@ -108,104 +111,129 @@ STEP 3 — ROW-BY-ROW ${total} MCQ BUBBLE EXTRACTION:
       });
     }
 
-    if (cleanMcqCrop) {
-      parts.push({
-        inlineData: {
-          mimeType: 'image/jpeg',
-          data: cleanMcqCrop,
-        },
-      });
-    }
-
     parts.push({ text: prompt });
 
-    const schemaConfig = {
-      temperature: 0.0,
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          idColumns: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                colIndex: { type: Type.INTEGER },
-                writtenBoxDigit: { type: Type.STRING },
-                darkenedBubbleDigit: { type: Type.STRING },
-                finalDigit: { type: Type.STRING },
-              },
-              required: ['colIndex', 'writtenBoxDigit', 'darkenedBubbleDigit', 'finalDigit'],
+    const responseSchema = {
+      type: Type.OBJECT,
+      properties: {
+        idDigits: {
+          type: Type.ARRAY,
+          items: { type: Type.STRING },
+        },
+        roll: { type: Type.STRING },
+        setCode: { type: Type.STRING },
+        studentName: { type: Type.STRING },
+        className: { type: Type.STRING },
+        schoolName: { type: Type.STRING },
+        answeredQuestions: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              question: { type: Type.INTEGER },
+              selected: { type: Type.STRING },
             },
-          },
-          roll: { type: Type.STRING },
-          setCode: { type: Type.STRING },
-          studentName: { type: Type.STRING },
-          className: { type: Type.STRING },
-          schoolName: { type: Type.STRING },
-          answers: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                question: { type: Type.INTEGER },
-                selected: { type: Type.STRING },
-              },
-              required: ['question', 'selected'],
-            },
+            required: ['question', 'selected'],
           },
         },
-        required: ['idColumns', 'roll', 'answers'],
       },
+      required: ['idDigits', 'roll', 'answeredQuestions'],
     };
 
-    let response;
-    try {
-      response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: { parts },
-        config: schemaConfig,
-      });
-    } catch {
-      response = await ai.models.generateContent({
-        model: 'gemini-flash-latest',
-        contents: { parts },
-        config: schemaConfig,
+    const candidateModels: Array<{ model: string; useLowThinking?: boolean }> = [
+      { model: 'gemini-3.1-flash-lite' },
+      { model: 'gemini-3.8-flash', useLowThinking: true },
+      { model: 'gemini-flash-latest' },
+    ];
+
+    let response: any = null;
+    let lastError: any = null;
+    for (const candidate of candidateModels) {
+      try {
+        response = await ai.models.generateContent({
+          model: candidate.model,
+          contents: { parts },
+          config: {
+            temperature: 0.0,
+            ...(candidate.useLowThinking
+              ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+              : {}),
+            responseMimeType: 'application/json',
+            responseSchema,
+          },
+        });
+        if (response && response.text) {
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Candidate model ${candidate.model} failed:`, err?.message || err);
+      }
+    }
+
+    if (!response || !response.text) {
+      const isQuota =
+        lastError?.message?.includes('429') ||
+        lastError?.message?.includes('quota') ||
+        lastError?.status === 'RESOURCE_EXHAUSTED';
+      return res.status(200).json({
+        fallbackToClientOptical: true,
+        quotaExhausted: Boolean(isQuota),
+        warning: isQuota
+          ? 'Gemini Vision free-tier quota limit reached. Falling back to local optical recognition.'
+          : 'Vision models unavailable. Falling back to local optical recognition.',
       });
     }
 
     const text = response.text || '{}';
     const parsed = JSON.parse(text);
 
-    let fromColumns = '';
-    if (Array.isArray(parsed.idColumns)) {
-      const sorted = [...parsed.idColumns].sort(
-        (a, b) => (Number(a.colIndex) || 0) - (Number(b.colIndex) || 0)
-      );
-      for (const col of sorted) {
-        const d =
-          normalizeDigitsServer(col.finalDigit) ||
-          normalizeDigitsServer(col.darkenedBubbleDigit) ||
-          normalizeDigitsServer(col.writtenBoxDigit);
-        if (d) {
-          fromColumns += d.slice(0, 1);
-        }
+    const fromArray = Array.isArray(parsed.idDigits)
+      ? normalizeDigitsServer(parsed.idDigits.join(''))
+      : '';
+    const fromString = normalizeDigitsServer(parsed.roll || '');
+
+    const finalRoll =
+      fromArray.length === 6
+        ? fromArray
+        : fromString.length >= fromArray.length
+        ? fromString.slice(0, 6)
+        : fromArray.slice(0, 6);
+
+    const answeredMap = new Map<number, string>();
+    const rawList = Array.isArray(parsed.answeredQuestions)
+      ? parsed.answeredQuestions
+      : Array.isArray(parsed.answers)
+      ? parsed.answers
+      : [];
+
+    for (const item of rawList) {
+      const qNum = Number(item.question);
+      const sel = String(item.selected || '').trim().toUpperCase();
+      if (qNum >= 1 && qNum <= total && ['A', 'B', 'C', 'D', 'MULTIPLE'].includes(sel)) {
+        answeredMap.set(qNum, sel);
       }
     }
 
-    const fromString = normalizeDigitsServer(parsed.roll || '');
-    parsed.roll =
-      fromColumns.length === 6
-        ? fromColumns
-        : fromString.length >= fromColumns.length
-        ? fromString.slice(0, 6)
-        : fromColumns.slice(0, 6);
+    const fullAnswers = [];
+    for (let q = 1; q <= total; q++) {
+      fullAnswers.push({
+        question: q,
+        selected: answeredMap.get(q) || '',
+      });
+    }
 
-    return res.status(200).json(parsed);
-  } catch (error: any) {
-    console.error('Vercel OMR Vision API error:', error);
-    return res.status(500).json({
-      error: error?.message || 'Failed to analyze OMR image via Gemini Vision',
+    return res.status(200).json({
+      roll: finalRoll,
+      setCode: parsed.setCode || 'A',
+      studentName: parsed.studentName || '',
+      className: parsed.className || '',
+      schoolName: parsed.schoolName || '',
+      answers: fullAnswers,
+    });
+  } catch {
+    return res.status(200).json({
+      fallbackToClientOptical: true,
     });
   }
 }

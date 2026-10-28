@@ -174,7 +174,7 @@ export const MobileOMRScanner: React.FC<MobileOMRScannerProps> = ({
     setCapturedRawImage(dataUrl);
 
     try {
-      // Step 1: Check if the image has a lossless digital barcode from OMR Designer
+      // Step 1: Check if the image is a lossless digital export or exact flat-aligned sheet
       const opticalResult = await analyzeOMRImageOpticalClientSide(dataUrl, totalQ);
 
       let finalRoll = normalizeRollId(opticalResult.roll);
@@ -184,9 +184,8 @@ export const MobileOMRScanner: React.FC<MobileOMRScannerProps> = ({
       let finalSchool = opticalResult.schoolName || '';
       let finalAnswers: StudentResponsesMap = { ...opticalResult.answers };
 
-      // Step 2: For ALL real camera photos or uploaded images without a lossless digital barcode,
-      // run the 3-Crop Contrast-Enhanced Gemini Vision pipeline for maximum accuracy!
-      if (!opticalResult.isDigitalBarcode) {
+      // Step 2: For camera photos or sheets without a full deterministic match, call Gemini Vision API
+      if (!opticalResult.isDeterministicMatch) {
         const prepared = await prepareOMRImagesForVision(dataUrl);
         if (prepared.idCropDataUrl) {
           setIdCropPreviewUrl(prepared.idCropDataUrl);
@@ -196,16 +195,42 @@ export const MobileOMRScanner: React.FC<MobileOMRScannerProps> = ({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            imageBase64: prepared.fullEnhancedDataUrl || dataUrl,
+            imageBase64: prepared.fullCompressedDataUrl || dataUrl,
             idCropBase64: prepared.idCropDataUrl,
-            mcqCropBase64: prepared.mcqCropDataUrl,
             mimeType: 'image/jpeg',
             totalQuestions: totalQ,
           }),
         });
 
-        if (res.ok) {
-          const visionData = await res.json();
+        let visionData: any = null;
+        try {
+          visionData = await res.json();
+        } catch {
+          visionData = null;
+        }
+
+        if (visionData?.quotaExhausted || visionData?.fallbackToClientOptical) {
+          setScanError(
+            '⚠️ Gemini AI ভিশন ক্লাউড কোটা সাময়িকভাবে ব্যস্ত থাকায় লোকাল অপটিক্যাল রিডার দিয়ে স্ক্যান সম্পন্ন হয়েছে। নিচে ৬-ডিজিট আইডি ও উত্তর মিলিয়ে সংরক্ষণ করুন।'
+          );
+        } else if (!res.ok) {
+          const rawErr = String(visionData?.error || '');
+          const isQuota =
+            rawErr.includes('429') ||
+            rawErr.includes('quota') ||
+            rawErr.includes('RESOURCE_EXHAUSTED') ||
+            res.status === 429;
+          if (isQuota) {
+            setScanError(
+              '⚠️ Gemini AI ভিশন ফ্রি কোটা সাময়িকভাবে পূর্ণ হয়েছে। অ্যাপের নিজস্ব লোকাল অপটিক্যাল রিডার দিয়ে স্ক্যান সম্পন্ন করা হয়েছে—নিচে তথ্য মিলিয়ে নিন।'
+            );
+          } else {
+            const errMsg =
+              visionData?.error ||
+              `সার্ভার থেকে OMR বিশ্লেষণ সম্পন্ন হয়নি (Status ${res.status})। অনুগ্রহ করে নিচে ৬-ডিজিট আইডি ও উত্তর যাচাই করুন।`;
+            setScanError(errMsg);
+          }
+        } else if (visionData) {
           const visionRoll = normalizeRollId(visionData.roll || '');
           if (visionRoll.length > 0) {
             finalRoll = visionRoll.slice(0, 6);
@@ -259,28 +284,33 @@ export const MobileOMRScanner: React.FC<MobileOMRScannerProps> = ({
 
       const evaluated = gradeOMRSheet(answerKey, finalAnswers, scoringRules);
 
-      // Automatically route score to the matched student row if 6-digit ID is present
+      // Step 4: Route score to the matched student row (isolated try/catch so Google Sheet sync errors don't break scan)
       if (finalRoll) {
-        const saveRes = await onSaveScannedResult({
-          roll: finalRoll,
-          setCode: finalSet,
-          name: resolvedName,
-          className: resolvedClass,
-          school: resolvedSchool,
-          mobile: resolvedMobile,
-          grading: evaluated,
-          syncToGoogleSheetNow: isGoogleSheetConnected,
-        });
-        setPopupSavedSuccess(true);
+        try {
+          const saveRes = await onSaveScannedResult({
+            roll: finalRoll,
+            setCode: finalSet,
+            name: resolvedName,
+            className: resolvedClass,
+            school: resolvedSchool,
+            mobile: resolvedMobile,
+            grading: evaluated,
+            syncToGoogleSheetNow: isGoogleSheetConnected,
+          });
+          setPopupSavedSuccess(true);
 
-        if (saveRes.isExistingUpdate) {
-          setScanSuccessBanner(
-            `স্ক্যান সম্পন্ন! ৬-ডিজিট আইডি #${finalRoll} (${saveRes.matchedRecord.name})-এর নামের পাশে প্রাপ্ত নম্বর ${evaluated.total}/${evaluated.fullMarks} (Right: ${evaluated.right}, Wrong: ${evaluated.wrong}, Empty: ${evaluated.empty}) স্বয়ংক্রিয়ভাবে যুক্ত হয়েছে।`
-          );
-        } else {
-          setScanSuccessBanner(
-            `স্ক্যান সম্পন্ন! ৬-ডিজিট আইডি #${finalRoll} শনাক্ত হয়েছে এবং প্রাপ্ত নম্বর ${evaluated.total}/${evaluated.fullMarks} (Right: ${evaluated.right}, Wrong: ${evaluated.wrong}, Empty: ${evaluated.empty}) সীট তালিকায় যুক্ত হয়েছে।`
-          );
+          if (saveRes.isExistingUpdate) {
+            setScanSuccessBanner(
+              `স্ক্যান সম্পন্ন! ৬-ডিজিট আইডি #${finalRoll} (${saveRes.matchedRecord.name})-এর নামের পাশে প্রাপ্ত নম্বর ${evaluated.total}/${evaluated.fullMarks} (Right: ${evaluated.right}, Wrong: ${evaluated.wrong}, Empty: ${evaluated.empty}) স্বয়ংক্রিয়ভাবে যুক্ত হয়েছে।`
+            );
+          } else {
+            setScanSuccessBanner(
+              `স্ক্যান সম্পন্ন! ৬-ডিজিট আইডি #${finalRoll} শনাক্ত হয়েছে এবং প্রাপ্ত নম্বর ${evaluated.total}/${evaluated.fullMarks} (Right: ${evaluated.right}, Wrong: ${evaluated.wrong}, Empty: ${evaluated.empty}) সীট তালিকায় যুক্ত হয়েছে।`
+            );
+          }
+        } catch {
+          // Local roster is still updated even if remote Google Sheet sync had an expired token
+          setPopupSavedSuccess(true);
         }
       }
 

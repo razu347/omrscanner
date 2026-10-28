@@ -132,33 +132,46 @@ export const OMRSheetDesigner: React.FC<OMRSheetDesignerProps> = ({
   const columnRanges = getThreeColumnRanges(totalQ);
 
   // Maintain 6-slot array for the 6-digit ID
-  const getRollSlots = (): string[] => {
+  const parseRollToSlots = (rawRoll: string): string[] => {
     const slots = ['', '', '', '', '', ''];
     for (let i = 0; i < 6; i++) {
-      slots[i] = omrRoll[i] && /[0-9]/.test(omrRoll[i]) ? omrRoll[i] : '';
+      slots[i] = rawRoll[i] && /[0-9]/.test(rawRoll[i]) ? rawRoll[i] : '';
     }
     return slots;
   };
 
-  const rollSlots = getRollSlots();
+  const rollSlots = parseRollToSlots(omrRoll);
   const setOptions: SetCodeChoice[] = ['A', 'B', 'C', 'D'];
 
   const handleDigitSelect = (colIndex: number, digit: number) => {
-    const current = getRollSlots();
     const digitStr = String(digit);
-    // Toggle off if already selected, otherwise set digit
-    current[colIndex] = current[colIndex] === digitStr ? '' : digitStr;
-    // Pad empty leading slots with '0' only when forming string if needed, or store 6 chars
-    const nextRoll = current.map((ch) => (ch === '' ? ' ' : ch)).join('');
-    setOmrRoll(nextRoll);
+    setOmrRoll((prevRoll) => {
+      const current = parseRollToSlots(prevRoll);
+      current[colIndex] = current[colIndex] === digitStr ? '' : digitStr;
+      return current.map((ch) => (ch === '' ? ' ' : ch)).join('');
+    });
   };
 
   const handleDigitInputBoxChange = (colIndex: number, val: string) => {
-    const clean = val.replace(/[^0-9]/g, '').slice(-1);
-    const current = getRollSlots();
-    current[colIndex] = clean;
-    const nextRoll = current.map((ch) => (ch === '' ? ' ' : ch)).join('');
-    setOmrRoll(nextRoll);
+    const digitsOnly = val.replace(/[^0-9]/g, '');
+    if (digitsOnly.length > 1) {
+      // Support pasting a multi-digit ID starting at colIndex (or from index 0 if 6 digits)
+      setOmrRoll((prevRoll) => {
+        const current = parseRollToSlots(prevRoll);
+        const startIdx = digitsOnly.length === 6 ? 0 : colIndex;
+        for (let i = 0; i < digitsOnly.length && startIdx + i < 6; i++) {
+          current[startIdx + i] = digitsOnly[i];
+        }
+        return current.map((ch) => (ch === '' ? ' ' : ch)).join('');
+      });
+      return;
+    }
+    const clean = digitsOnly.slice(-1);
+    setOmrRoll((prevRoll) => {
+      const current = parseRollToSlots(prevRoll);
+      current[colIndex] = clean;
+      return current.map((ch) => (ch === '' ? ' ' : ch)).join('');
+    });
   };
 
   const handleBubbleToggle = (q: number, opt: 'A' | 'B' | 'C' | 'D') => {

@@ -33,7 +33,7 @@ const THEME_PALETTES: Record<
 };
 
 export interface ClientOpticalScanResult {
-  isDigitalBarcode: boolean;
+  isDeterministicMatch: boolean;
   confidence: 'high' | 'medium' | 'low';
   roll: string;
   setCode: SetCodeChoice;
@@ -45,10 +45,6 @@ export interface ClientOpticalScanResult {
 
 const BARCODE_MAGIC = 'BBOMR6:';
 
-/**
- * Encodes a UTF-8 string into the bottom row (y = canvas.height - 1) of pixels
- * so any PNG exported from the OMR Designer can be decoded with 100% precision.
- */
 function encodeOpticalMetadataRow(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -118,7 +114,12 @@ function decodeOpticalMetadataRow(
   }
 }
 
-function drawCornerFiducialTarget(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
+function drawCornerFiducialTarget(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number
+) {
   ctx.fillStyle = '#0F172A';
   ctx.fillRect(x, y, size, size);
   ctx.fillStyle = '#FFFFFF';
@@ -129,19 +130,11 @@ function drawCornerFiducialTarget(ctx: CanvasRenderingContext2D, x: number, y: n
 
 /**
  * Renders an authentic, colorful A4 "বাংলা বিদ্যাপীঠ" OMR Sheet onto an HTML5 Canvas and returns a PNG data URL.
- * Includes:
- * - 4 Bullseye Corner optical registration marks
- * - Heading "বাংলা বিদ্যাপীঠ"
- * - নাম:, শ্রেণি:, স্কুল: boxes
- * - পূর্ণমান (Full Marks) & প্রাপ্ত নম্বর (Obtained Marks) boxes
- * - রোল / আইডি নম্বর (6-digit high-clarity bubble grid with alternating row bands & left/right 0-9 row guides)
- * - সেট কোড (Set Code A, B, C, D bubble grid)
- * - 3-Column dynamic MCQ bubble grid with 5-question horizontal alignment dividers
  */
 export function renderSyntheticOMRSheetDataUrl(params: {
   headingTitle?: string;
   examSubtitle?: string;
-  roll: string; // 6-digit string or 6-char slot string
+  roll: string;
   setCode?: SetCodeChoice | '';
   studentName: string;
   className?: string;
@@ -179,7 +172,7 @@ export function renderSyntheticOMRSheetDataUrl(params: {
   ctx.lineWidth = 3;
   ctx.strokeRect(48, 36, canvas.width - 96, canvas.height - 72);
 
-  // 4 High-Contrast Bullseye Corner Fiducial Marks (for Mobile Camera Scanner)
+  // 4 High-Contrast Bullseye Corner Fiducial Marks
   const markSize = 28;
   drawCornerFiducialTarget(ctx, 16, 16, markSize);
   drawCornerFiducialTarget(ctx, canvas.width - 16 - markSize, 16, markSize);
@@ -198,11 +191,7 @@ export function renderSyntheticOMRSheetDataUrl(params: {
   ctx.fillStyle = '#FFFFFF';
   ctx.font = 'bold 30px "Hind Siliguri", "Plus Jakarta Sans", sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(
-    params.headingTitle || 'বাংলা বিদ্যাপীঠ',
-    canvas.width / 2,
-    91
-  );
+  ctx.fillText(params.headingTitle || 'বাংলা বিদ্যাপীঠ', canvas.width / 2, 91);
 
   ctx.font = '500 14px "Hind Siliguri", "Plus Jakarta Sans", sans-serif';
   ctx.fillStyle = '#FCE7F3';
@@ -212,7 +201,6 @@ export function renderSyntheticOMRSheetDataUrl(params: {
     113
   );
 
-  // Top Section Height = 276px (y = 136 to 412)
   const topBoxY = 136;
   const topBoxH = 276;
 
@@ -264,7 +252,7 @@ export function renderSyntheticOMRSheetDataUrl(params: {
   ctx.font = 'bold 15px "Hind Siliguri", sans-serif';
   ctx.fillText(params.schoolName || '', 136, topBoxY + 148);
 
-  // পূর্ণমান (Full Marks) & প্রাপ্ত নম্বর (Obtained Marks) Boxes
+  // পূর্ণমান & প্রাপ্ত নম্বর Boxes
   ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(78, topBoxY + 180, 176, 78);
   ctx.strokeStyle = palette.primary;
@@ -277,7 +265,6 @@ export function renderSyntheticOMRSheetDataUrl(params: {
   ctx.font = 'bold 24px "JetBrains Mono", monospace';
   ctx.fillText(String(params.fullMarks ?? totalQ), 88, topBoxY + 240);
 
-  // প্রাপ্ত নম্বর Box
   ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(270, topBoxY + 180, 176, 78);
   ctx.strokeStyle = palette.primary;
@@ -295,7 +282,7 @@ export function renderSyntheticOMRSheetDataUrl(params: {
     topBoxY + 240
   );
 
-  // Section 2: Middle Box — ৬-ডিজিট রোল / আইডি নম্বর (6-Digit High-Clarity Bubble Grid)
+  // Section 2: Middle Box — ৬-ডিজিট রোল / আইডি নম্বর
   const idBoxX = 472;
   const idBoxW = 286;
   ctx.fillStyle = '#FFFFFF';
@@ -304,7 +291,6 @@ export function renderSyntheticOMRSheetDataUrl(params: {
   ctx.lineWidth = 1.5;
   ctx.strokeRect(idBoxX, topBoxY, idBoxW, topBoxH);
 
-  // Header bar inside ID Box
   ctx.fillStyle = palette.tintBg;
   ctx.fillRect(idBoxX + 1, topBoxY + 1, idBoxW - 2, 22);
   ctx.textAlign = 'center';
@@ -312,7 +298,6 @@ export function renderSyntheticOMRSheetDataUrl(params: {
   ctx.font = 'bold 13px "Hind Siliguri", sans-serif';
   ctx.fillText('রোল / আইডি নম্বর (৬ ডিজিট · 6-Digit ID)', idBoxX + idBoxW / 2, topBoxY + 16);
 
-  // Parse 6 digit slots accurately without shifting partial slots
   const rawRollStr = params.roll || '';
   const cleanDigitsOnly = normalizeRollId(rawRollStr);
   const rollDigits: string[] = ['', '', '', '', '', ''];
@@ -328,7 +313,6 @@ export function renderSyntheticOMRSheetDataUrl(params: {
     }
   }
 
-  // Alternating horizontal row bands across all 6 columns + Left & Right row guide numbers (0-9)
   for (let d = 0; d <= 9; d++) {
     const cy = topBoxY + 72 + d * 21;
     if (d % 2 === 1) {
@@ -347,7 +331,6 @@ export function renderSyntheticOMRSheetDataUrl(params: {
   for (let col = 0; col < 6; col++) {
     const cx = idBoxX + 42 + col * 40;
 
-    // Large, clear digit box at top of column
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(cx - 16, topBoxY + 26, 32, 28);
     ctx.strokeStyle = palette.primary;
@@ -358,7 +341,6 @@ export function renderSyntheticOMRSheetDataUrl(params: {
     ctx.font = 'bold 18px "JetBrains Mono", monospace';
     ctx.fillText(rollDigits[col] || '', cx, topBoxY + 46);
 
-    // 10 bubbles (0-9) in vertical column
     for (let d = 0; d <= 9; d++) {
       const cy = topBoxY + 72 + d * 21;
       const isFilled = rollDigits[col] !== '' && Number(rollDigits[col]) === d;
@@ -448,7 +430,6 @@ export function renderSyntheticOMRSheetDataUrl(params: {
     ctx.lineWidth = 1.5;
     ctx.strokeRect(xBase, gridStartY, colWidth, boxHeight);
 
-    // Column Header Bar
     ctx.fillStyle = palette.tintBg;
     ctx.fillRect(xBase + 1, gridStartY + 1, colWidth - 2, 30);
     ctx.fillStyle = palette.primary;
@@ -468,7 +449,6 @@ export function renderSyntheticOMRSheetDataUrl(params: {
         ctx.fillRect(xBase + 2, yBase - 16, colWidth - 4, 32);
       }
 
-      // Every 5th question horizontal guide line to prevent row-drift
       if (q % 5 === 0 && q < range.end) {
         ctx.strokeStyle = palette.border;
         ctx.lineWidth = 1;
@@ -531,7 +511,6 @@ export function renderSyntheticOMRSheetDataUrl(params: {
     }
   });
 
-  // Encode lossless optical metadata strip on the bottom pixel row for 100% deterministic decoding
   encodeOpticalMetadataRow(ctx, canvas.width, canvas.height, {
     roll: rollDigits.join(''),
     setCode: activeSet || 'A',
@@ -545,150 +524,107 @@ export function renderSyntheticOMRSheetDataUrl(params: {
 }
 
 /**
- * Applies adaptive contrast stretching to a canvas so uneven camera lighting/shadows
- * on paper become crisp white and pen/pencil marks become high-contrast dark pixels.
- */
-function enhanceCanvasContrastForOMR(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  try {
-    const imgData = ctx.getImageData(0, 0, width, height);
-    const data = imgData.data;
-
-    // Compute luminance histogram percentiles (p5 dark, p85 paper background)
-    const hist = new Uint32Array(256);
-    const totalPixels = width * height;
-    for (let i = 0; i < data.length; i += 4) {
-      const lum = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-      hist[lum]++;
-    }
-
-    let cum = 0;
-    let low = 20;
-    let high = 235;
-    for (let v = 0; v < 256; v++) {
-      cum += hist[v];
-      if (cum <= totalPixels * 0.02) low = v;
-      if (cum <= totalPixels * 0.85) high = v;
-    }
-
-    const range = Math.max(40, high - low);
-    for (let i = 0; i < data.length; i += 4) {
-      for (let c = 0; c < 3; c++) {
-        const norm = Math.max(0, Math.min(1, (data[i + c] - low) / range));
-        // Slight gamma curve to push paper background to clean white and dark marks to crisp black
-        const curved = norm > 0.78 ? 1 : Math.pow(norm, 1.15);
-        data[i + c] = Math.round(curved * 255);
-      }
-    }
-
-    ctx.putImageData(imgData, 0, 0);
-  } catch {
-    // Ignore contrast enhancement errors
-  }
-}
-
-/**
- * Prepares 3 high-clarity images from a raw camera photo or uploaded OMR image for Gemini Vision:
- * 1. fullEnhancedDataUrl: Contrast-normalized full OMR sheet
- * 2. idCropDataUrl: 2x high-resolution crop of the top Candidate Details + 6-Digit Roll/ID Grid + Set Code
- * 3. mcqCropDataUrl: High-resolution crop of the bottom 3-column MCQ Bubble Grid
+ * Prepares compact, un-distorted JPEG images (<250KB total) for fast Gemini Vision upload
+ * (well under Vercel's 4.5MB Serverless Function payload limit).
  */
 export async function prepareOMRImagesForVision(imageDataUrl: string): Promise<{
-  fullEnhancedDataUrl: string;
+  fullCompressedDataUrl: string;
   idCropDataUrl: string;
-  mcqCropDataUrl: string;
 }> {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       try {
-        // 1. Full contrast-enhanced image
+        // 1. Cleanly resized full image (max 1150px on longest side, no destructive contrast wash-out)
         const fullCanvas = document.createElement('canvas');
-        const scale = Math.min(1.5, 1400 / Math.max(1, img.width));
-        fullCanvas.width = Math.round(img.width * scale);
-        fullCanvas.height = Math.round(img.height * scale);
+        const maxDim = Math.max(img.width, img.height, 1);
+        const scale = Math.min(1, 1150 / maxDim);
+        fullCanvas.width = Math.max(1, Math.round(img.width * scale));
+        fullCanvas.height = Math.max(1, Math.round(img.height * scale));
         const fullCtx = fullCanvas.getContext('2d');
         if (!fullCtx) {
           resolve({
-            fullEnhancedDataUrl: imageDataUrl,
+            fullCompressedDataUrl: imageDataUrl,
             idCropDataUrl: '',
-            mcqCropDataUrl: '',
           });
           return;
         }
         fullCtx.fillStyle = '#FFFFFF';
         fullCtx.fillRect(0, 0, fullCanvas.width, fullCanvas.height);
         fullCtx.drawImage(img, 0, 0, fullCanvas.width, fullCanvas.height);
-        enhanceCanvasContrastForOMR(fullCtx, fullCanvas.width, fullCanvas.height);
-        const fullEnhancedDataUrl = fullCanvas.toDataURL('image/jpeg', 0.92);
+        const fullCompressedDataUrl = fullCanvas.toDataURL('image/jpeg', 0.85);
 
-        // 2. Top 44% Crop (Candidate Info + 6-Digit ID Grid + Set Code) at high resolution
+        // 2. Top 42% Crop (Candidate Info + 6-Digit ID Grid + Set Code) at crisp resolution
         const idCanvas = document.createElement('canvas');
-        const topSrcH = Math.max(80, Math.floor(img.height * 0.44));
-        idCanvas.width = Math.min(1600, Math.round(img.width * 1.5));
-        idCanvas.height = Math.min(1000, Math.round(topSrcH * 1.5));
+        const topSrcH = Math.max(80, Math.floor(img.height * 0.42));
+        const cropScale = Math.min(1.25, 1100 / Math.max(1, img.width));
+        idCanvas.width = Math.max(1, Math.round(img.width * cropScale));
+        idCanvas.height = Math.max(1, Math.round(topSrcH * cropScale));
         const idCtx = idCanvas.getContext('2d');
         let idCropDataUrl = '';
         if (idCtx) {
           idCtx.fillStyle = '#FFFFFF';
           idCtx.fillRect(0, 0, idCanvas.width, idCanvas.height);
           idCtx.drawImage(img, 0, 0, img.width, topSrcH, 0, 0, idCanvas.width, idCanvas.height);
-          enhanceCanvasContrastForOMR(idCtx, idCanvas.width, idCanvas.height);
-          idCropDataUrl = idCanvas.toDataURL('image/jpeg', 0.94);
-        }
-
-        // 3. Bottom 72% Crop (3-Column MCQ Bubble Grid)
-        const mcqCanvas = document.createElement('canvas');
-        const mcqSrcY = Math.floor(img.height * 0.28);
-        const mcqSrcH = Math.max(100, img.height - mcqSrcY);
-        mcqCanvas.width = Math.min(1600, Math.round(img.width * 1.35));
-        mcqCanvas.height = Math.min(1600, Math.round(mcqSrcH * 1.35));
-        const mcqCtx = mcqCanvas.getContext('2d');
-        let mcqCropDataUrl = '';
-        if (mcqCtx) {
-          mcqCtx.fillStyle = '#FFFFFF';
-          mcqCtx.fillRect(0, 0, mcqCanvas.width, mcqCanvas.height);
-          mcqCtx.drawImage(
-            img,
-            0,
-            mcqSrcY,
-            img.width,
-            mcqSrcH,
-            0,
-            0,
-            mcqCanvas.width,
-            mcqCanvas.height
-          );
-          enhanceCanvasContrastForOMR(mcqCtx, mcqCanvas.width, mcqCanvas.height);
-          mcqCropDataUrl = mcqCanvas.toDataURL('image/jpeg', 0.92);
+          idCropDataUrl = idCanvas.toDataURL('image/jpeg', 0.88);
         }
 
         resolve({
-          fullEnhancedDataUrl,
+          fullCompressedDataUrl,
           idCropDataUrl,
-          mcqCropDataUrl,
         });
       } catch {
         resolve({
-          fullEnhancedDataUrl: imageDataUrl,
+          fullCompressedDataUrl: imageDataUrl,
           idCropDataUrl: '',
-          mcqCropDataUrl: '',
         });
       }
     };
     img.onerror = () =>
       resolve({
-        fullEnhancedDataUrl: imageDataUrl,
+        fullCompressedDataUrl: imageDataUrl,
         idCropDataUrl: '',
-        mcqCropDataUrl: '',
       });
     img.src = imageDataUrl;
   });
 }
 
+function getPixelLuminance(imgData: ImageData, x: number, y: number): number {
+  const cx = Math.max(0, Math.min(imgData.width - 1, Math.round(x)));
+  const cy = Math.max(0, Math.min(imgData.height - 1, Math.round(y)));
+  const idx = (cy * imgData.width + cx) * 4;
+  return (
+    0.299 * imgData.data[idx] +
+    0.587 * imgData.data[idx + 1] +
+    0.114 * imgData.data[idx + 2]
+  );
+}
+
 /**
- * Measures average pixel darkness (0 = pure white, 1 = pure black) inside a circular region.
+ * Verifies if the normalized 960 x H canvas is an exact flat digital/exported OMR sheet
+ * by checking the white outer margin and the 4 corner fiducial marks.
  */
+function hasExactCornerFiducials(imgData: ImageData): boolean {
+  const { width, height } = imgData;
+  // Outer corners (4, 4) and (width-5, 4) must be white paper margin (lum > 220)
+  if (
+    getPixelLuminance(imgData, 4, 4) < 220 ||
+    getPixelLuminance(imgData, width - 5, 4) < 220 ||
+    getPixelLuminance(imgData, 4, height - 5) < 220
+  ) {
+    return false;
+  }
+
+  // Center of the 4 corner fiducial marks (30, 30), (width-30, 30), (30, height-30), (width-30, height-30) must be dark (< 80)
+  const c1 = getPixelLuminance(imgData, 30, 30) < 80;
+  const c2 = getPixelLuminance(imgData, width - 30, 30) < 80;
+  const c3 = getPixelLuminance(imgData, 30, height - 30) < 80;
+  const c4 = getPixelLuminance(imgData, width - 30, height - 30) < 80;
+
+  return c1 && c2 && c3 && c4;
+}
+
 function sampleCircleDarkness(
   imgData: ImageData,
   cx: number,
@@ -711,10 +647,8 @@ function sampleCircleDarkness(
       const dy = y - cy;
       if (dx * dx + dy * dy <= rSq) {
         const idx = (y * width + x) * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-        const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        const lum =
+          0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
         sumDarkness += (255 - lum) / 255;
         count++;
       }
@@ -725,11 +659,72 @@ function sampleCircleDarkness(
 }
 
 /**
- * Client-Side Optical OMR Scanner:
- * - Returns `isDigitalBarcode: true` ONLY when the lossless optical barcode row (`BBOMR6:`) is present
- *   (which happens on digital sheets exported from OMR Designer, giving 100.0% exact decoding).
- * - For camera photos/uploads without the digital barcode, returns `isDigitalBarcode: false` so the
- *   caller ALWAYS runs the 3-crop Gemini Vision pipeline and uses pixel sampling only as a fallback.
+ * Finds the center of a dark bullseye fiducial mark inside a search quadrant of an ImageData buffer.
+ */
+function findQuadrantFiducialCenter(
+  imgData: ImageData,
+  startX: number,
+  endX: number,
+  startY: number,
+  endY: number,
+  preferCornerX: number,
+  preferCornerY: number
+): { x: number; y: number; found: boolean } {
+  const { width, height, data } = imgData;
+  const minX = Math.max(8, Math.floor(startX));
+  const maxX = Math.min(width - 9, Math.ceil(endX));
+  const minY = Math.max(8, Math.floor(startY));
+  const maxY = Math.min(height - 9, Math.ceil(endY));
+
+  let bestScore = -Infinity;
+  let bestX = preferCornerX;
+  let bestY = preferCornerY;
+  let found = false;
+
+  const step = Math.max(2, Math.floor(Math.min(width, height) / 240));
+  const diag = Math.hypot(width, height) || 1;
+
+  for (let y = minY; y <= maxY; y += step) {
+    for (let x = minX; x <= maxX; x += step) {
+      const idx = (y * width + x) * 4;
+      const centerLum =
+        0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
+      if (centerLum > 115) continue;
+
+      // Sample 5x5 neighborhood average darkness
+      let darkSum = 0;
+      for (let dy = -4; dy <= 4; dy += 4) {
+        for (let dx = -4; dx <= 4; dx += 4) {
+          const nIdx = ((y + dy) * width + (x + dx)) * 4;
+          const lum =
+            0.299 * data[nIdx] +
+            0.587 * data[nIdx + 1] +
+            0.114 * data[nIdx + 2];
+          darkSum += (255 - lum) / 255;
+        }
+      }
+      const avgDark = darkSum / 9;
+      if (avgDark < 0.52) continue;
+
+      const distPenalty = Math.hypot(x - preferCornerX, y - preferCornerY) / diag;
+      const score = avgDark - distPenalty * 0.45;
+      if (score > bestScore) {
+        bestScore = score;
+        bestX = x;
+        bestY = y;
+        found = true;
+      }
+    }
+  }
+
+  return { x: bestX, y: bestY, found };
+}
+
+/**
+ * Deterministic & Fiducial-Aligned Client-Side Optical OMR Scanner:
+ * 1. Decodes lossless digital barcode row (`BBOMR6:`) if present.
+ * 2. Checks `hasExactCornerFiducials` (or aligns via detected quadrant corner fiducials).
+ * 3. Uses median-relative column/row darkness comparison so uneven lighting in camera photos doesn't skew bubble reads.
  */
 export async function analyzeOMRImageOpticalClientSide(
   imageDataUrl: string,
@@ -759,7 +754,7 @@ export async function analyzeOMRImageOpticalClientSide(
           const meta = decodeOpticalMetadataRow(rawCtx, img.width, img.height);
           if (meta && (meta.roll !== undefined || meta.responses !== undefined)) {
             resolve({
-              isDigitalBarcode: true,
+              isDeterministicMatch: true,
               confidence: 'high',
               roll: normalizeRollId(meta.roll || ''),
               setCode: (['A', 'B', 'C', 'D'].includes(meta.setCode)
@@ -774,14 +769,13 @@ export async function analyzeOMRImageOpticalClientSide(
           }
         }
 
-        // Secondary pixel fallback for offline/non-barcode images
         const normCanvas = document.createElement('canvas');
         normCanvas.width = canonicalW;
         normCanvas.height = canonicalH;
         const normCtx = normCanvas.getContext('2d');
         if (!normCtx) {
           resolve({
-            isDigitalBarcode: false,
+            isDeterministicMatch: false,
             confidence: 'low',
             roll: '',
             setCode: 'A',
@@ -794,40 +788,136 @@ export async function analyzeOMRImageOpticalClientSide(
         }
 
         normCtx.drawImage(img, 0, 0, canonicalW, canonicalH);
-        const normData = normCtx.getImageData(0, 0, canonicalW, canonicalH);
+        let normData = normCtx.getImageData(0, 0, canonicalW, canonicalH);
+        const isFlatSheet = hasExactCornerFiducials(normData);
+
+        // If not already at exact (30,30) fiducial coordinates, check if the 4 corner fiducials can be auto-aligned
+        if (!isFlatSheet) {
+          const tl = findQuadrantFiducialCenter(
+            normData,
+            8,
+            canonicalW * 0.28,
+            8,
+            canonicalH * 0.25,
+            30,
+            30
+          );
+          const tr = findQuadrantFiducialCenter(
+            normData,
+            canonicalW * 0.72,
+            canonicalW - 8,
+            8,
+            canonicalH * 0.25,
+            canonicalW - 30,
+            30
+          );
+          const bl = findQuadrantFiducialCenter(
+            normData,
+            8,
+            canonicalW * 0.28,
+            canonicalH * 0.75,
+            canonicalH - 8,
+            30,
+            canonicalH - 30
+          );
+          const br = findQuadrantFiducialCenter(
+            normData,
+            canonicalW * 0.72,
+            canonicalW - 8,
+            canonicalH * 0.75,
+            canonicalH - 8,
+            canonicalW - 30,
+            canonicalH - 30
+          );
+
+          if (tl.found && tr.found && bl.found && br.found) {
+            const avgTopX = (tl.x + bl.x) / 2;
+            const avgRightX = (tr.x + br.x) / 2;
+            const avgTopY = (tl.y + tr.y) / 2;
+            const avgBotY = (bl.y + br.y) / 2;
+            const spanW = avgRightX - avgTopX;
+            const spanH = avgBotY - avgTopY;
+
+            if (spanW > canonicalW * 0.45 && spanH > canonicalH * 0.45) {
+              const targetSpanW = canonicalW - 60;
+              const targetSpanH = canonicalH - 60;
+              const scaleX = targetSpanW / spanW;
+              const scaleY = targetSpanH / spanH;
+
+              const alignedCanvas = document.createElement('canvas');
+              alignedCanvas.width = canonicalW;
+              alignedCanvas.height = canonicalH;
+              const alignedCtx = alignedCanvas.getContext('2d');
+              if (alignedCtx) {
+                alignedCtx.fillStyle = '#FFFFFF';
+                alignedCtx.fillRect(0, 0, canonicalW, canonicalH);
+                alignedCtx.setTransform(
+                  scaleX,
+                  0,
+                  0,
+                  scaleY,
+                  30 - avgTopX * scaleX,
+                  30 - avgTopY * scaleY
+                );
+                alignedCtx.drawImage(normCanvas, 0, 0);
+                normData = alignedCtx.getImageData(0, 0, canonicalW, canonicalH);
+              }
+            }
+          }
+        }
 
         const topBoxY = 136;
         const idBoxX = 472;
         const detectedDigits: string[] = [];
+        let matchedDigitCols = 0;
 
         for (let col = 0; col < 6; col++) {
           const cx = idBoxX + 42 + col * 40;
-          let maxDark = 0;
-          let secondDark = 0;
-          let bestDigit = -1;
+          const colScores: { digit: number; darkness: number }[] = [];
 
           for (let d = 0; d <= 9; d++) {
             const cy = topBoxY + 72 + d * 21;
             const darkness = sampleCircleDarkness(normData, cx, cy, 6.5);
-            if (darkness > maxDark) {
-              secondDark = maxDark;
-              maxDark = darkness;
-              bestDigit = d;
-            } else if (darkness > secondDark) {
-              secondDark = darkness;
-            }
+            colScores.push({ digit: d, darkness });
           }
 
-          if (bestDigit >= 0 && maxDark > 0.42 && maxDark - secondDark > 0.16) {
-            detectedDigits.push(String(bestDigit));
+          colScores.sort((a, b) => b.darkness - a.darkness);
+          const maxDark = colScores[0].darkness;
+          const secondDark = colScores[1].darkness;
+          const medianDark = colScores[5].darkness;
+
+          if (
+            maxDark > 0.28 &&
+            maxDark - medianDark > 0.11 &&
+            maxDark - secondDark > 0.08
+          ) {
+            detectedDigits.push(String(colScores[0].digit));
+            matchedDigitCols++;
           } else {
             detectedDigits.push('');
           }
         }
 
+        // Check Set Code bubbles (A, B, C, D)
+        const setBoxX = 770;
+        const setBoxW = 126;
+        const setOptions: SetCodeChoice[] = ['A', 'B', 'C', 'D'];
+        let bestSet: SetCodeChoice = 'A';
+        const setScores = setOptions.map((sOpt, idx) => {
+          const sy = topBoxY + 94 + idx * 44;
+          return {
+            opt: sOpt,
+            score: sampleCircleDarkness(normData, setBoxX + setBoxW / 2, sy, 9),
+          };
+        });
+        setScores.sort((a, b) => b.score - a.score);
+        if (setScores[0].score > 0.3 && setScores[0].score - setScores[1].score > 0.08) {
+          bestSet = setScores[0].opt;
+        }
+
         const gridStartY = 428;
         const colStarts = [64, 348, 632];
-        const options: ('A' | 'B' | 'C' | 'D')[] = ['A', 'B', 'C', 'D'];
+        const options: ('A' | 'B' | 'C' | 'D')[] = ['A', 'B', 'C' , 'D'];
         const answers: StudentResponsesMap = {};
 
         colRanges.forEach((range, colIdx) => {
@@ -845,7 +935,11 @@ export async function analyzeOMRImageOpticalClientSide(
             }
 
             darkScores.sort((a, b) => b.score - a.score);
-            if (darkScores[0].score > 0.42 && darkScores[0].score - darkScores[1].score > 0.15) {
+            const best = darkScores[0].score;
+            const second = darkScores[1].score;
+            const median = (darkScores[2].score + darkScores[3].score) / 2;
+
+            if (best > 0.28 && best - median > 0.11 && best - second > 0.07) {
               answers[q] = darkScores[0].opt;
             } else {
               answers[q] = '';
@@ -854,10 +948,10 @@ export async function analyzeOMRImageOpticalClientSide(
         });
 
         resolve({
-          isDigitalBarcode: false,
-          confidence: 'medium',
+          isDeterministicMatch: isFlatSheet && matchedDigitCols === 6,
+          confidence: isFlatSheet ? 'high' : 'low',
           roll: detectedDigits.join(''),
-          setCode: 'A',
+          setCode: bestSet,
           studentName: '',
           className: '',
           schoolName: '',
@@ -865,7 +959,7 @@ export async function analyzeOMRImageOpticalClientSide(
         });
       } catch {
         resolve({
-          isDigitalBarcode: false,
+          isDeterministicMatch: false,
           confidence: 'low',
           roll: '',
           setCode: 'A',
@@ -878,7 +972,7 @@ export async function analyzeOMRImageOpticalClientSide(
     };
     img.onerror = () =>
       resolve({
-        isDigitalBarcode: false,
+        isDeterministicMatch: false,
         confidence: 'low',
         roll: '',
         setCode: 'A',
